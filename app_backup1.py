@@ -150,35 +150,14 @@ def llm_chat(messages, model=DEFAULT_MODEL, max_tokens=800):
 
 def detect_intent(user_text: str):
     text = user_text.lower()
-    
-    # More precise invoice detection
-    invoice_phrases = [
-        "create invoice", "generate invoice", "make invoice",
-        "create bill", "generate bill", "make bill",
-        "invoice for", "bill for"
-    ]
-    if any(phrase in text for phrase in invoice_phrases):
-        name_match = re.search(r"(?:invoice|bill|for)\s+(?:for|to|of)?\s*([a-zA-Z\s]+?)\s*(?:for|of|₹|rs|rupees|amount)", text)
-        amt_match = re.search(r"(?:₹|rs\.?|rupees?|inr)\s*(\d{2,7}(?:,\d{3})*(?:\.\d{1,2})?)", text) or \
-                   re.search(r"\b(\d{2,7}(?:,\d{3})*(?:\.\d{1,2})?)\s*(?:₹|rs|rupees|inr)?\b", text)
-        
+    if any(k in text for k in ["invoice", "bill", "create bill", "create invoice"]):
+        name_match = re.search(r"(?:invoice|bill)\s+(?:for|to)\s+([a-zA-Z]+)", text)
+        amt_match = re.search(r"(?:₹|rs\.?\s*)?(\d{2,7}(?:\.\d{1,2})?)", text)
         cust = name_match.group(1).strip().title() if name_match else ""
-        amt = float(amt_match.group(1).replace(',', '')) if amt_match else 0.0
+        amt = float(amt_match.group(1)) if amt_match else 0.0
         return ("invoice", {"customer": cust, "amount": amt})
-    
-    # Strict document detection - only when user explicitly mentions uploading
-    doc_phrases = [
-        "upload document", "explain document", "analyze document",
-        "upload pdf", "explain pdf", "analyze pdf",
-        "upload gst", "explain gst", "analyze notice",
-        "can you analyze this", "help me understand this document"
-    ]
-    # Only trigger if user explicitly mentions uploading or analyzing a document
-    has_upload_words = any(word in text for word in ["upload", "analyze", "explain"])
-    has_doc_words = any(word in text for word in ["document", "pdf", "gst", "notice"])
-    if (has_upload_words and has_doc_words) or any(phrase in text for phrase in doc_phrases):
+    if any(k in text for k in ["upload", "document", "notice", "pdf", "explain my document", "gst document"]):
         return ("document", {})
-    
     return ("chat", {})
 
 def generate_invoice_pdf(customer: str, amount: float) -> BytesIO:
@@ -389,44 +368,20 @@ if st.session_state.logged_in_user:
             intent, data = detect_intent(user_input)
             st.session_state.last_intent = intent
 
-            # Enhanced invoice detection and redirection
             if intent == "invoice":
-                customer = data.get("customer", "") or st.session_state.invoice_customer
-                amount = data.get("amount", 0.0) or st.session_state.invoice_amount
-                
-                # Update session state with extracted values
-                st.session_state.invoice_customer = customer
-                st.session_state.invoice_amount = amount
-                
-                # Generate immediate response before redirecting
-                if customer and amount:
-                    quick_reply = f"Sure! Taking you to the Invoice Generator for {customer} with amount ₹{amount:,.2f}..."
-                elif customer:
-                    quick_reply = f"Understood! Preparing invoice for {customer}. Please enter the amount."
-                elif amount:
-                    quick_reply = f"Got it! Preparing invoice for ₹{amount:,.2f}. Please enter customer name."
-                else:
-                    quick_reply = "Taking you to the Invoice Generator..."
-                
-                st.session_state.messages.append({"role": "assistant", "content": quick_reply})
-                st.chat_message("assistant").markdown(quick_reply)
-                
-                # Redirect to invoice generator
+                st.session_state.invoice_customer = data.get("customer", "") or st.session_state.invoice_customer
+                amt = data.get("amount", 0.0)
+                st.session_state.invoice_amount = amt if amt else st.session_state.invoice_amount
                 st.session_state.active_tab = "Invoice Generator"
                 st.rerun()
 
             elif intent == "document":
-                # Document explanation redirection
-                quick_reply = "Please upload your document in the Document Explainer section and I'll analyze it for you."
-                st.session_state.messages.append({"role": "assistant", "content": quick_reply})
-                st.chat_message("assistant").markdown(quick_reply)
                 st.session_state.active_tab = "Explain Document"
                 st.rerun()
 
-            # For regular chat queries
             with st.spinner("Thinking..."):
                 bot_reply = llm_chat(st.session_state.messages, model=DEFAULT_MODEL, max_tokens=2000)
-            
+
             st.session_state.messages.append({"role": "assistant", "content": bot_reply})
             st.chat_message("assistant").markdown(bot_reply)
 
